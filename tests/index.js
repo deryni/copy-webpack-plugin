@@ -1,4 +1,4 @@
-/* globals describe, it, __dirname */
+/* globals describe, it, beforeEach, before, after, __dirname */
 import {
     expect
 } from 'chai';
@@ -164,6 +164,29 @@ describe('apply function', () => {
             fs.unlinkSync(opts.newFileLoc1);
             fs.unlinkSync(opts.newFileLoc2);
         });
+    };
+
+    const runPermissions = (opts) => {
+        return run(opts)
+            .then((compilation) => {
+                if (opts.expectedAssetKeys && opts.expectedAssetKeys.length > 0) {
+                    expect(compilation.assets).to.have.all.keys(opts.expectedAssetKeys);
+                } else {
+                    expect(compilation.assets).to.deep.equal({});
+                }
+
+                if (opts.expectedAssetPermissions) {
+                    for (var key in opts.expectedAssetPermissions) {
+                        expect(compilation.assets[key]).to.exist;
+                        if (compilation.assets[key]) {
+                            let expectedPerm = opts.expectedAssetPermissions[key];
+                            let outMode = fs.statSync();
+                            let resultPerm = outMode & (fs.contents.S_IRWXU | fs.contents.S_IRWXG | fs.contents.S_IRWXO);
+                            expect(resultPerm).to.equal(expectedPerm);
+                        }
+                    }
+                }
+            });
     };
 
     // Use then and catch explicitly, so errors
@@ -1046,6 +1069,77 @@ describe('apply function', () => {
                 patterns: [{
                     from: 'directory',
                     to: 'nested/[path][name]-[hash:6].[ext]'
+                }]
+            })
+            .then(done)
+            .catch(done);
+        });
+    });
+
+    describe('copying permissions', () => {
+        var rwrr = fs.constants.S_IRUSR | fs.constants.S_IWUSR |
+                   fs.constants.S_IRGRP |
+                   fs.constants.S_IROTH;
+        var srcPerms = {
+            'permfile1': rwrr,
+            'permfile2': fs.constants.S_IRWXU |
+                         fs.constants.S_IRGRP | fs.constants.S_IXGRP |
+                         fs.constants.S_IROTH | fs.constants.S_IXOTH,
+            'permfile3': fs.constants.S_IWUSR |
+                         fs.constants.S_IRGRP |
+                         fs.constants.S_IXOTH
+        };
+
+        before(() => {
+            fs.mkdirSync(path.resolve(HELPER_DIR, 'permfiles'));
+            for (var key in srcPerms) {
+                fs.writeFileSync(path.resolve(HELPER_DIR, 'permfiles', key), '');
+            }
+        });
+
+        beforeEach(() => {
+            for (var key in srcPerms) {
+                fs.chmodSync(path.resolve(HELPER_DIR, 'permfiles', key), srcPerms[key]);
+            }
+        });
+
+        after(() => {
+            for (var key in srcPerms) {
+                fs.unlinkSync(path.resolve(HELPER_DIR, 'permfiles', key));
+            }
+            fs.rmdir(path.resolve(HELPER_DIR, 'permfiles'));
+        });
+
+        it('can ignore permissions', (done) => {
+            runPermissions({
+                expectedAssetKeys: [
+                    'permfile1',
+                    'permfile2',
+                    'permfile3'
+                ],
+                expectedAssetPermissions: {
+                    'permfile1': rwrr,
+                    'permfile2': rwrr,
+                    'permfile3': rwrr
+                },
+                patterns: [{
+                    from: 'permfiles'
+                }]
+            })
+            .then(done)
+            .catch(done);
+        });
+
+        it('can copy files with various permissions', (done) => {
+            runPermissions({
+                expectedAssetKeys: [
+                    'permfile1',
+                    'permfile2',
+                    'permfile3'
+                ],
+                expectedAssetPermissions: srcPerms,
+                patterns: [{
+                    from: 'permfiles'
                 }]
             })
             .then(done)
